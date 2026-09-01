@@ -303,12 +303,29 @@
     display:none;
     background:#0a0d13;
   }
-  #neptunMiniMap iframe{position:absolute; border:0; pointer-events:auto;}
+  #neptunMiniMapCanvas{position:absolute; inset:0;}
   #neptunMiniMapLabel{
     position:absolute; left:6px; top:5px; z-index:2;
     font-size:9.5px; letter-spacing:.04em; color:#cfd6e2;
     background:rgba(10,13,19,.72); padding:2px 6px; border-radius:4px;
     font-family:'JetBrains Mono', monospace; pointer-events:none;
+  }
+  #neptunMiniMap .maplibregl-ctrl-attrib{
+    font-size:9px; background:rgba(10,13,19,.6); color:var(--text-faint);
+  }
+  #neptunMiniMap .maplibregl-ctrl-attrib a{color:var(--text-dim);}
+  #neptunMiniMap .maplibregl-marker{cursor:pointer;}
+  #neptunMiniMap .maplibregl-popup-content{
+    background:var(--panel-raised); color:var(--text);
+    font-family:'PT Sans', sans-serif; font-size:12px;
+    padding:8px 10px; border-radius:6px; box-shadow:0 4px 16px rgba(0,0,0,.4);
+  }
+  #neptunMiniMap .maplibregl-popup-tip{border-top-color:var(--panel-raised); border-bottom-color:var(--panel-raised);}
+  #neptunMiniMap .maplibregl-popup-close-button{color:var(--text-dim); font-size:16px;}
+  .neptun-me-marker{
+    width:12px; height:12px; border-radius:50%;
+    background:#3aa0ff; border:2px solid #eaf3ff;
+    box-shadow:0 0 0 4px rgba(58,160,255,.28);
   }
 
   .legend{
@@ -585,6 +602,9 @@
   }
 </style>
 
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+
 <div id="app">
 
   <div id="topbar">
@@ -634,7 +654,7 @@
             <div id="neptunNearList" style="display:none; font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--text-dim); line-height:1.7; margin-top:4px;"></div>
           </div>
           <div class="row-resizer" id="compassRowResizer" role="separator" aria-orientation="horizontal" aria-label="Змінити розмір карти NEPTUN" title="Потягни, щоб змінити розмір карти"></div>
-          <div id="neptunMiniMap"><span id="neptunMiniMapLabel">NEPTUN — карта</span></div>
+          <div id="neptunMiniMap"><div id="neptunMiniMapCanvas"></div><span id="neptunMiniMapLabel">NEPTUN — цілі наживо</span></div>
         </div>
         <div id="ppoTip">Бачиш або чуєш загрозу з неба — повідом через застосунок «єППО» або на гарячу лінію 15-39.</div>
       </div>
@@ -1484,11 +1504,13 @@
         setNeptunBadge("ok");
         renderNeptunNearList();
         renderCompass(lastAlertsForRender, lastDataOkForRender);
+        renderNeptunMiniMapMarkers();
       })
       .catch(function(err){
         neptunOk = false; neptunThreats = []; neptunNearest = null; neptunNearList = [];
         setNeptunBadge("fail");
         renderNeptunNearList();
+        renderNeptunMiniMapMarkers();
       });
   }
 
@@ -1511,31 +1533,69 @@
   // Small always-on NEPTUN map living right in the compass panel — separate
   // from the big map panel's alerts.in.ua/NEPTUN toggle, so you get the
   // abstract precise-distance dial AND a real geographic view (with NEPTUN's
-  // own live flight trails) in the same glance.
+  // own live targets) in the same glance, auto-centered on whichever city
+  // is selected.
   //
-  // Deliberately NOT using the oversized-iframe crop-zoom trick the big map
-  // panel uses: tested it live against neptun.in.ua and it's a bad fit for
-  // their map specifically — it's WebGL-based (MapLibre), and Chrome
-  // throttles rendering/tile-loading hard for an iframe whose element is
-  // mostly positioned outside the visible viewport (which is exactly what a
-  // crop-zoomed oversized iframe is under the hood, even though the *visible
-  // crop* sits on-screen). Confirmed: a plain, naturally-sized iframe painted
-  // real map tiles in ~3s; the same map cropped from a 1.5–3x oversized frame
-  // was still blank 12–20s later. So this stays natural-sized (no crop, no
-  // offset) — NEPTUN's own default whole-Ukraine view, pannable/zoomable by
-  // hand since it's a real interactive map, not auto-centered on the city.
+  // NOT built on NEPTUN's own embeddable iframe (unlike the big map panel's
+  // NEPTUN toggle). Two things were confirmed live against neptun.in.ua
+  // before choosing this approach: (1) their embed is WebGL (MapLibre), and
+  // Chrome throttles tile-loading hard for an iframe positioned mostly
+  // outside the viewport — exactly what the big map's oversized-crop-zoom
+  // trick does under the hood, so that trick renders blank here; (2) their
+  // embed page has no supported way to be told "center on this city" from
+  // outside — the flyTo/showMe command bridge in their client code only
+  // works inside their own app's WebView (same-window JS), not via
+  // postMessage from a cross-origin <iframe>, and there's no lat/lon/city
+  // query param either (tested: adding ?lat=&lon= to the embed URL had no
+  // effect on the initial view).
   //
-  // Auto-centering on the selected city was investigated directly against
-  // NEPTUN's live client code: their embed page does expose an internal
-  // command bridge (flyTo/showMe/etc, found as window.__neptunBridge in
-  // their bundle), but it's wired only for their own React Native app's
-  // WebView (injected same-window JS) — the embed page has no
-  // window.addEventListener("message", ...) handler, so a cross-origin
-  // <iframe> like ours has no supported way to call it. There is no
-  // lat/lon/city query-param either (tested live: adding ?lat=&lon=&city=
-  // to the embed URL has no effect on the initial view). So there is
-  // currently no real way to auto-center this map on the chosen city —
-  // the label below tells you what to look for instead.
+  // So instead this draws its own small MapLibre GL map directly on the
+  // page (not in an iframe — a real in-DOM canvas, so none of the
+  // off-viewport throttling above applies), using OpenFreeMap's free,
+  // no-key, CORS-open vector tiles (the same tile host NEPTUN's own map
+  // uses) as the basemap, and plots NEPTUN's real threat data — which we
+  // already fetch for the compass overlay — as markers on it. This gives
+  // genuine flyTo-on-city-change behaviour, which the iframe approach
+  // could not.
+  var neptunMiniMapInstance = null;
+  var neptunMiniMapMarkers = [];
+  var neptunMiniMeMarker = null;
+  var neptunMiniResizeQueued = false;
+
+  function queueNeptunMiniMapResize(){
+    if(!neptunMiniMapInstance || neptunMiniResizeQueued) return;
+    neptunMiniResizeQueued = true;
+    requestAnimationFrame(function(){
+      neptunMiniResizeQueued = false;
+      if(neptunMiniMapInstance) neptunMiniMapInstance.resize();
+    });
+  }
+
+  function ensureNeptunMiniMap(){
+    if(neptunMiniMapInstance || typeof maplibregl === "undefined") return neptunMiniMapInstance;
+    var city = currentCity();
+    try{
+      neptunMiniMapInstance = new maplibregl.Map({
+        container: "neptunMiniMapCanvas",
+        style: "https://tiles.openfreemap.org/styles/liberty",
+        center: [city.lon, city.lat],
+        zoom: 8.6,
+        attributionControl: false,
+        cooperativeGestures: false
+      });
+      neptunMiniMapInstance.addControl(new maplibregl.AttributionControl({
+        compact: true,
+        customAttribution: "© OpenFreeMap © OpenMapTiles © OpenStreetMap · дані цілей: NEPTUN"
+      }));
+      neptunMiniMapInstance.addControl(new maplibregl.NavigationControl({showCompass:false}), "top-right");
+      neptunMiniMapInstance.on("load", function(){ renderNeptunMiniMapMarkers(); });
+      new ResizeObserver(queueNeptunMiniMapResize).observe(document.getElementById("neptunMiniMap"));
+    }catch(e){
+      neptunMiniMapInstance = null;
+    }
+    return neptunMiniMapInstance;
+  }
+
   function renderNeptunMiniMap(){
     var wrap = document.getElementById("neptunMiniMap");
     if(!wrap) return;
@@ -1543,17 +1603,54 @@
     if(!state.neptunEnabled){ wrap.style.display = "none"; return; }
     wrap.style.display = "block";
     var city = currentCity();
-    var iframe = document.getElementById("neptunMiniIframe");
-    if(!iframe){
-      iframe = document.createElement("iframe");
-      iframe.id = "neptunMiniIframe";
-      iframe.src = "https://neptun.in.ua/embed/map?lang=uk";
-      iframe.title = "NEPTUN — карта цілей";
-      iframe.style.cssText = "position:absolute; left:0; top:0; width:100%; height:100%; border:0;";
-      wrap.appendChild(iframe);
+    var map = ensureNeptunMiniMap();
+    if(map){
+      map.flyTo({center: [city.lon, city.lat], zoom: 8.6, duration: 800, essential: true});
+      queueNeptunMiniMapResize();
+      renderNeptunMiniMapMarkers();
     }
     var lbl = document.getElementById("neptunMiniMapLabel");
-    if(lbl) lbl.textContent = "NEPTUN — рухай/масштабуй самостійно (шукай " + city.name + ")";
+    if(lbl) lbl.textContent = "NEPTUN — цілі наживо · " + city.name;
+  }
+
+  // Redraws the threat markers on the mini-map. Cheap to call often — it's
+  // just re-placed DOM markers, no map reload — so fetchNeptun() calls this
+  // on every refresh (~20s) without disturbing whatever the user is looking
+  // at (only an explicit city change re-centers the view, via flyTo above).
+  function renderNeptunMiniMapMarkers(){
+    var map = neptunMiniMapInstance;
+    if(!map || typeof maplibregl === "undefined") return;
+    neptunMiniMapMarkers.forEach(function(m){ m.remove(); });
+    neptunMiniMapMarkers = [];
+    if(neptunMiniMeMarker){ neptunMiniMeMarker.remove(); neptunMiniMeMarker = null; }
+
+    var city = currentCity();
+    if(city){
+      var meEl = document.createElement("div");
+      meEl.className = "neptun-me-marker";
+      neptunMiniMeMarker = new maplibregl.Marker({element: meEl})
+        .setLngLat([city.lon, city.lat])
+        .setPopup(new maplibregl.Popup({offset: 10}).setText(city.name))
+        .addTo(map);
+    }
+
+    if(!state.neptunEnabled || !neptunOk) return;
+    neptunThreats.forEach(function(t){
+      var el = document.createElement("div");
+      var color = t.advisory ? "#8996ac" : "#ff6b3d";
+      var size = t.advisory ? 9 : 13;
+      el.style.cssText = "width:" + size + "px; height:" + size + "px; border-radius:3px; " +
+        "background:" + color + "; border:1.5px solid rgba(10,13,19,.85); " +
+        "box-shadow:0 0 6px " + color + "aa; transform:rotate(45deg);" +
+        (t.heading != null ? "transform:rotate(" + t.heading + "deg);" : "");
+      var popupHtml = "<b>" + escapeHtml(t.title) + "</b>" + (t.place ? "<br>" + escapeHtml(t.place) : "") +
+        (t.advisory ? "<br><span style=\"color:#8996ac\">спостереження, не підтверджено</span>" : "");
+      var marker = new maplibregl.Marker({element: el})
+        .setLngLat([t.lon, t.lat])
+        .setPopup(new maplibregl.Popup({offset: 10}).setHTML(popupHtml))
+        .addTo(map);
+      neptunMiniMapMarkers.push(marker);
+    });
   }
 
   function scheduleNeptun(){
