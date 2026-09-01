@@ -264,6 +264,24 @@
   }
   #compassSvgHolder svg{max-width:100%; max-height:100%;}
 
+  #neptunMiniMap{
+    flex:0 0 240px;
+    width:100%;
+    border-radius:8px;
+    overflow:hidden;
+    position:relative;
+    border:1px solid var(--line);
+    display:none;
+    background:#0a0d13;
+  }
+  #neptunMiniMap iframe{position:absolute; border:0; pointer-events:auto;}
+  #neptunMiniMapLabel{
+    position:absolute; left:6px; top:5px; z-index:2;
+    font-size:9.5px; letter-spacing:.04em; color:#cfd6e2;
+    background:rgba(10,13,19,.72); padding:2px 6px; border-radius:4px;
+    font-family:'JetBrains Mono', monospace; pointer-events:none;
+  }
+
   .legend{
     display:flex;
     flex-wrap:wrap;
@@ -570,6 +588,7 @@
     <section class="panel" aria-label="Флюгер">
       <div class="panel-head">
         <h2>Флюгер</h2>
+        <a class="tag mono" id="neptunBadge" href="https://neptun.in.ua/" target="_blank" rel="noopener" title="Дані: NEPTUN — карта повітряних тривог" style="display:none; margin-right:6px; text-decoration:none;"></a>
         <span class="tag mono" id="compassUpdated">—</span>
       </div>
       <div class="panel-body">
@@ -579,8 +598,11 @@
             <span><i style="background:var(--accent)"></i>Спокійно</span>
             <span><i style="background:var(--warn)"></i>Тривога поруч</span>
             <span><i style="background:var(--danger)"></i>Тривога тут</span>
+            <span id="neptunLegendItem" style="display:none;"><i style="background:#ff6b3d"></i>NEPTUN: ціль наживо</span>
           </div>
           <div class="compass-note" id="compassNote"></div>
+          <div id="neptunNearList" style="display:none; font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--text-dim); line-height:1.7; margin-top:4px;"></div>
+          <div id="neptunMiniMap"><span id="neptunMiniMapLabel">NEPTUN — карта</span></div>
         </div>
         <div id="ppoTip">Бачиш або чуєш загрозу з неба — повідом через застосунок «єППО» або на гарячу лінію 15-39.</div>
       </div>
@@ -605,14 +627,15 @@
     <!-- MAP -->
     <section class="panel" aria-label="Мапа тривог">
       <div class="panel-head" style="flex-wrap:wrap; row-gap:6px;">
-        <h2 style="flex:0 0 auto;">Мапа тривог<span id="mapCityTag" class="tag mono" style="margin-left:6px;"></span></h2>
+        <h2 id="mapTitle" style="flex:0 0 auto;"><span id="mapTitleLabel">Мапа тривог</span><span id="mapCityTag" class="tag mono" style="margin-left:6px;"></span></h2>
+        <button class="iconbtn" id="mapSourceBtn" title="Перемкнути джерело мапи" style="width:auto;padding:0 9px;font-size:12px;">🎯 NEPTUN</button>
         <div style="flex:1;"></div>
         <button class="iconbtn" id="mapPanBtn" title="Рухати мапу (потім сама запам'ятає позицію)" style="width:auto;padding:0 9px;font-size:12px;">✥ рух</button>
         <button class="iconbtn" id="mapZoomOutBtn" title="Віддалити" style="width:30px;padding:0;font-size:14px;">−</button>
         <button class="iconbtn" id="mapZoomInBtn" title="Наблизити" style="width:30px;padding:0;font-size:14px;">+</button>
         <button class="iconbtn" id="mapResetBtn" title="Скинути моє налаштування позиції" style="width:auto;padding:0 9px;font-size:12px;">⟲</button>
         <button class="iconbtn" id="mapFocusBtn" title="Увімкнути/вимкнути авто-наближення" style="width:auto;padding:0 10px;font-size:12px;">🔍 наблизити</button>
-        <a class="linkbtn" href="https://alerts.in.ua/" target="_blank" rel="noopener">На весь екран ↗</a>
+        <a class="linkbtn" id="mapFullscreenLink" href="https://alerts.in.ua/" target="_blank" rel="noopener">На весь екран ↗</a>
       </div>
       <div class="panel-body">
         <div id="mapViewport">
@@ -663,6 +686,19 @@
       </div>
 
       <div class="field">
+        <label>Додаткові джерела</label>
+        <div class="row between">
+          <span style="font-size:12.5px; color:var(--text-dim);">NEPTUN / «Dron Alerts» — реальні позиції цілей на флюгері (без токена, перевірено наживо)</span>
+          <div class="switch" id="neptunSwitch" role="switch" aria-checked="false" tabindex="0"></div>
+        </div>
+        <div class="hint" id="neptunStatusHint">Джерело: застосунок «Dron Alerts» (neptun.in.ua) — відкритий безкоштовний API без ключа, дані по конкретних населених пунктах з напрямком і координатами. Це не заміна офіційних тривог alerts.in.ua, а доповнення: NEPTUN сам зазначає, що це агрегатор, а не офіційна система оповіщення.</div>
+        <div class="row" style="gap:8px; margin-top:6px;">
+          <a href="https://radarua.com" target="_blank" rel="noopener" class="smallbtn" style="text-decoration:none; display:inline-flex; align-items:center;">🛰 Відкрити RadarUA окремо</a>
+          <span class="hint" style="margin:0;">(власний API RadarUA не публічний — вбудувати напряму не можна)</span>
+        </div>
+      </div>
+
+      <div class="field">
         <label for="channelsInput">Telegram-канали (по одному @хендлу в рядку)</label>
         <textarea id="channelsInput" spellcheck="false"></textarea>
         <div class="hint">Підібрані канали можна замінити на свої — просто впиши хендл без t.me/.</div>
@@ -702,7 +738,7 @@
       <button class="primary-btn" id="saveSettingsBtn">Зберегти й застосувати</button>
 
       <div class="credits">
-        Мапа тривог — <a href="https://alerts.in.ua" target="_blank" rel="noopener">alerts.in.ua</a> (спільнотний проєкт). Флюгер зліва рахує напрямок і відстань до областей із активною тривогою за офіційними даними alerts.in.ua — це не заміна застосунку «Флюгер» одеської команди, який працює на власній мережі акустичних сенсорів і не має публічного API для вбудовування. Канали новин — оригінальні відкриті Telegram-канали, кожен підписаний своїм хендлом.
+        Мапа тривог — <a href="https://alerts.in.ua" target="_blank" rel="noopener">alerts.in.ua</a> (спільнотний проєкт). Флюгер зліва рахує напрямок і відстань до областей із активною тривогою за офіційними даними alerts.in.ua — це не заміна застосунку «Флюгер» одеської команди, який працює на власній мережі акустичних сенсорів і не має публічного API для вбудовування. Мітки реальних цілей на флюгері (жовтогарячі трикутники) — дані: <a href="https://neptun.in.ua/" target="_blank" rel="noopener">NEPTUN — карта повітряних тривог</a>, інформаційний агрегатор, не офіційна система оповіщення. Канали новин — оригінальні відкриті Telegram-канали, кожен підписаний своїм хендлом.
       </div>
     </div>
   </div>
@@ -802,6 +838,7 @@
       rotateSeconds: 20,
       columnFractions: [0.24, 0.36, 0.40],
       mapAutoFocus: true,
+      mapSource: "alerts", // "alerts" (alerts.in.ua) | "neptun" (neptun.in.ua live map)
       mapManualByCity: {},
       soundEnabled: true,
       soundOnAlert: true,
@@ -810,10 +847,13 @@
       tgLastSeen: {},
       tgCache: {},
       tgProxyPref: {},
+      alertsProxyPref: null,
       channelsCuratedVersion: 2,
       hereLat: null,
       hereLon: null,
-      hereUpdatedAt: null
+      hereUpdatedAt: null,
+      neptunEnabled: true,
+      neptunDefaultApplied: true
     };
   }
 
@@ -831,6 +871,14 @@
           parsed.channelsByCity[cid] = DEFAULT_CHANNELS_BY_CITY[cid].slice();
         });
         parsed.channelsCuratedVersion = 2;
+      }
+      // One-time: NEPTUN's API got verified live (real endpoint, real CORS,
+      // real data) after it shipped as an opt-in toggle default-off. Turn
+      // it on once for anyone who already has saved state; never again
+      // override it after that, so a manual off-toggle sticks.
+      if(!parsed.neptunDefaultApplied){
+        parsed.neptunEnabled = true;
+        parsed.neptunDefaultApplied = true;
       }
       return parsed;
     }catch(e){ return defaultState(); }
@@ -957,8 +1005,14 @@
   var statusPill = document.getElementById("statusPill");
   var statusText = document.getElementById("statusText");
 
-  var RINGS_KM = [100, 250, 400];
-  var RING_PX = [58, 96, 134];
+  // Rings tuned for real personal precision near the chosen point (5/15/50/150 км),
+  // not for spanning the whole country — that's what made everything nearby
+  // collapse into the same tiny dot before. A sqrt curve (below) also gives
+  // close-range distances much more room on the dial than a linear scale would,
+  // while still fitting a far-away oblast alert on-disc instead of clipping it.
+  var RINGS_KM = [5, 15, 50, 150];
+  var COMPASS_MAX_KM = 450; // anything farther just sits at the outer rim
+  var COMPASS_MAX_R = 138;
   var lastCompassLevel = null;
 
   function toRad(d){ return d * Math.PI / 180; }
@@ -981,11 +1035,15 @@
     return (brng + 360) % 360;
   }
 
+  var COMPASS_LABELS = ["Пн","ПнСх","Сх","ПдСх","Пд","ПдЗх","Зх","ПнЗх"];
+  function bearingToLabel(deg){
+    var idx = Math.round(((deg % 360) + 360) % 360 / 45) % 8;
+    return COMPASS_LABELS[idx];
+  }
+
   function distanceToRadius(km){
-    if(km <= RINGS_KM[0]) return (km/RINGS_KM[0]) * RING_PX[0];
-    if(km <= RINGS_KM[1]) return RING_PX[0] + ((km-RINGS_KM[0])/(RINGS_KM[1]-RINGS_KM[0])) * (RING_PX[1]-RING_PX[0]);
-    if(km <= RINGS_KM[2]) return RING_PX[1] + ((km-RINGS_KM[1])/(RINGS_KM[2]-RINGS_KM[1])) * (RING_PX[2]-RING_PX[1]);
-    return RING_PX[2];
+    var capped = Math.min(Math.max(km, 0), COMPASS_MAX_KM);
+    return COMPASS_MAX_R * Math.sqrt(capped / COMPASS_MAX_KM);
   }
 
   // "Home" region is whichever curated area is physically nearest the
@@ -1053,48 +1111,56 @@
     glow.setAttribute("fill", level === "active" ? "rgba(239,75,75,.14)" : level === "nearby" ? "rgba(240,166,58,.09)" : level === "calm" ? "rgba(51,214,166,.07)" : "rgba(140,150,170,.05)");
     svg.appendChild(glow);
 
-    // rings
-    RING_PX.forEach(function(r, i){
+    // rings — colour follows the current overall level, so the dial reads
+    // green/orange/red at a glance instead of always-grey circles.
+    var ringColor = level === "active" ? "#ef4b4b" : level === "nearby" ? "#f0a63a" : level === "calm" ? "#2a9c7a" : "#232d3d";
+    var ringLabelColor = level === "active" ? "#ef4b4b" : level === "nearby" ? "#f0a63a" : level === "calm" ? "#33d6a6" : "#5c6980";
+    RINGS_KM.forEach(function(km, i){
+      var r = distanceToRadius(km);
       var c = svgNS("circle");
       c.setAttribute("cx", cx); c.setAttribute("cy", cy); c.setAttribute("r", r);
       c.setAttribute("fill", "none");
-      c.setAttribute("stroke", "#232d3d");
+      c.setAttribute("stroke", ringColor);
       c.setAttribute("stroke-width", "1");
+      c.setAttribute("opacity", "0.8");
       svg.appendChild(c);
       var lbl = svgNS("text");
       lbl.setAttribute("x", cx + 4); lbl.setAttribute("y", cy - r - 3);
-      lbl.setAttribute("fill", "#5c6980");
+      lbl.setAttribute("fill", ringLabelColor);
       lbl.setAttribute("font-size", "9");
       lbl.setAttribute("font-family", "JetBrains Mono, monospace");
       lbl.textContent = RINGS_KM[i] + " км";
       svg.appendChild(lbl);
     });
 
-    // cross-hairs + cardinal labels
-    var dirs = [["N",0],["E",90],["S",180],["W",270]];
+    // cross-hairs + cardinal labels — all 8 points of the compass (Ukrainian
+    // abbreviations, matching the NAJБЛИЖЧІ ЦІЛІ list's bearing labels).
+    var dirs = [["Пн",0],["ПнСх",45],["Сх",90],["ПдСх",135],["Пд",180],["ПдЗх",225],["Зх",270],["ПнЗх",315]];
     dirs.forEach(function(d){
       var rad = toRad(d[1]);
-      var x2 = cx + 142*Math.sin(rad), y2 = cy - 142*Math.cos(rad);
+      var main = (d[1] % 90 === 0); // N/E/S/W get a slightly longer, brighter line+label
+      var lineLen = main ? 142 : 138;
+      var x2 = cx + lineLen*Math.sin(rad), y2 = cy - lineLen*Math.cos(rad);
       var line = svgNS("line");
       line.setAttribute("x1", cx); line.setAttribute("y1", cy);
       line.setAttribute("x2", x2); line.setAttribute("y2", y2);
       line.setAttribute("stroke", "#1a2230"); line.setAttribute("stroke-width", "1");
       svg.appendChild(line);
-      var lx = cx + 156*Math.sin(rad), ly = cy - 156*Math.cos(rad);
+      var lx = cx + (lineLen+14)*Math.sin(rad), ly = cy - (lineLen+14)*Math.cos(rad);
       var t = svgNS("text");
       t.setAttribute("x", lx); t.setAttribute("y", ly + 4);
       t.setAttribute("text-anchor", "middle");
-      t.setAttribute("fill", d[0]==="N" ? "#8996ac" : "#5c6980");
-      t.setAttribute("font-size", "12");
+      t.setAttribute("fill", d[0]==="Пн" ? "#8996ac" : "#5c6980");
+      t.setAttribute("font-size", main ? "12" : "9.5");
       t.setAttribute("font-family", "Oswald, sans-serif");
-      t.setAttribute("font-weight", "600");
+      t.setAttribute("font-weight", main ? "600" : "500");
       t.textContent = d[0];
       svg.appendChild(t);
     });
 
     // arrows to active oblasts
     arrows.forEach(function(a){
-      var r = Math.max(distanceToRadius(a.dist), 22);
+      var r = Math.max(distanceToRadius(a.dist), 9);
       var rad = toRad(a.brng);
       var x2 = cx + r*Math.sin(rad), y2 = cy - r*Math.cos(rad);
       var col = a.dist < 150 ? "#ef4b4b" : "#f0a63a";
@@ -1112,10 +1178,52 @@
       svg.appendChild(ah);
     });
 
-    // hub
+    // NEPTUN live-target markers (verified working public API, see fetchNeptun above)
+    if(state.neptunEnabled && neptunOk && neptunThreats.length){
+      // nearest-first, cap how many we draw so the compass doesn't turn into noise
+      var sortedThreats = neptunThreats.slice().sort(function(a,b){
+        return haversineKm(city.lat, city.lon, a.lat, a.lon) - haversineKm(city.lat, city.lon, b.lat, b.lon);
+      }).slice(0, 12);
+      sortedThreats.forEach(function(t){
+        var dist = haversineKm(city.lat, city.lon, t.lat, t.lon);
+        var brng = bearingDeg(city.lat, city.lon, t.lat, t.lon);
+        var r = Math.max(distanceToRadius(dist), 8);
+        var rad = toRad(brng);
+        var x = cx + r*Math.sin(rad), y = cy - r*Math.cos(rad);
+        var pointRad = (t.heading != null) ? toRad(t.heading) : rad;
+        // advisory = "спостереження, не сигнал ховатися" per NEPTUN's docs — draw
+        // smaller and muted grey so it doesn't read as an active threat.
+        var size = t.advisory ? 4.5 : 6.5;
+        var col = t.advisory ? "#8996ac" : "#ff6b3d";
+        var tipX = x + size*Math.sin(pointRad), tipY = y - size*Math.cos(pointRad);
+        var baseAx = x + size*0.6*Math.sin(pointRad + 2.5), baseAy = y - size*0.6*Math.cos(pointRad + 2.5);
+        var baseBx = x + size*0.6*Math.sin(pointRad - 2.5), baseBy = y - size*0.6*Math.cos(pointRad - 2.5);
+        var tri = svgNS("polygon");
+        tri.setAttribute("points", tipX+","+tipY+" "+baseAx+","+baseAy+" "+baseBx+","+baseBy);
+        tri.setAttribute("fill", col);
+        tri.setAttribute("stroke", "#1a0d05");
+        tri.setAttribute("stroke-width", "0.6");
+        var ttl = svgNS("title");
+        ttl.textContent = "NEPTUN: " + t.title + (t.place ? " — " + t.place : "") + " · " + Math.round(dist) + " км" + (t.advisory ? " (спостереження)" : "");
+        tri.appendChild(ttl);
+        svg.appendChild(tri);
+      });
+    }
+
+    // hub — your actual point. Colour + a soft halo match the rings/status
+    // pill exactly now (used to fall through to plain grey for "nearby",
+    // which read as broken/inconsistent next to orange rings).
+    var hubColor = level === "active" ? "#ef4b4b" : level === "nearby" ? "#f0a63a" : level === "calm" ? "#33d6a6" : "#8996ac";
+    var hubHalo = svgNS("circle");
+    hubHalo.setAttribute("cx", cx); hubHalo.setAttribute("cy", cy); hubHalo.setAttribute("r", 11);
+    hubHalo.setAttribute("fill", hubColor);
+    hubHalo.setAttribute("opacity", "0.18");
+    svg.appendChild(hubHalo);
     var hub = svgNS("circle");
-    hub.setAttribute("cx", cx); hub.setAttribute("cy", cy); hub.setAttribute("r", 5);
-    hub.setAttribute("fill", level === "active" ? "#ef4b4b" : level === "calm" ? "#33d6a6" : "#8996ac");
+    hub.setAttribute("cx", cx); hub.setAttribute("cy", cy); hub.setAttribute("r", 6);
+    hub.setAttribute("fill", hubColor);
+    hub.setAttribute("stroke", "#0b0f16");
+    hub.setAttribute("stroke-width", "1.5");
     svg.appendChild(hub);
 
     compassHolder.innerHTML = "";
@@ -1152,28 +1260,88 @@
       statusText.textContent = "Спокійно";
       compassNote.textContent = "Активних тривог поблизу не зафіксовано.";
     }
+    if(level !== "unknown" && state.neptunEnabled && neptunOk && neptunNearest){
+      compassNote.textContent += "  ·  NEPTUN: " + neptunNearest.title + (neptunNearest.place ? " (" + neptunNearest.place + ")" : "") + " · " + Math.round(neptunNearest.dist) + " км";
+    }
     compassUpdated.textContent = dataOk ? "оновлено " + new Date().toLocaleTimeString("uk-UA") : "офлайн";
   }
 
   /* ---------- Live data fetch ---------- */
   var fetchTimer = null;
+  var lastAlertsForRender = [];
+  var lastDataOkForRender = false;
+
+  // Confirmed live (cross-origin fetch test, both from a local file AND from
+  // the hosted GitHub Pages domain): api.alerts.in.ua does not send CORS
+  // headers for browser requests — a direct fetch() throws "Failed to fetch"
+  // everywhere, regardless of hosting. This isn't a token problem or a
+  // one-off glitch, it's the API itself: alerts.in.ua's own docs say to proxy
+  // it server-side. Since there's no dedicated proxy set up yet, fall back to
+  // the same public CORS-proxy chain already used for Telegram — same
+  // reliability trade-off (works most of the time, occasionally flaky), but
+  // it actually works instead of failing 100% of the time.
+  // Own proxy loop (rather than reusing Telegram's fetchWithProxies) because
+  // that one discards the HTTP status on any non-200 and just moves to the
+  // next proxy — fine for Telegram HTML, wrong here: a genuinely bad/expired
+  // token would silently burn through all 6 proxies (~40s) before reporting
+  // a generic "couldn't connect" instead of "token rejected". Some proxies
+  // also flatten every status to 200, so a real auth error is detected by
+  // the response SHAPE (alerts.in.ua's error body has no "alerts" array)
+  // as well as by status code, and either one stops the loop immediately.
+  function fetchAlertsViaProxyChain(url){
+    var list = orderedProxies(state.alertsProxyPref);
+    var i = 0;
+    function attempt(){
+      if(i >= list.length) return Promise.reject(new Error("all proxies failed"));
+      var proxy = list[i]; i++;
+      return fetchWithTimeout(proxy.build(url), 7000).then(function(res){
+        return res.text().then(function(text){
+          var data;
+          try{ data = JSON.parse(text); } catch(e){ throw new Error("bad json from proxy"); }
+          if(data && (Array.isArray(data) || Array.isArray(data.alerts))){
+            state.alertsProxyPref = proxy.name;
+            return data;
+          }
+          var authErr = new Error((data && (data.message || data.error)) || "unexpected response shape");
+          authErr.httpStatus = (res.status === 401 || res.status === 403) ? res.status : 401;
+          throw authErr;
+        });
+      }).catch(function(err){
+        if(err && err.httpStatus) throw err; // authoritative — stop instead of cycling further
+        return attempt();
+      });
+    }
+    return attempt();
+  }
+
+  function fetchAlertsJson(url){
+    return fetchWithTimeout(url, 8000).then(function(res){
+      if(!res.ok){ var e = new Error("HTTP " + res.status); e.httpStatus = res.status; throw e; }
+      return res.json();
+    }).catch(function(directErr){
+      if(directErr && (directErr.httpStatus === 401 || directErr.httpStatus === 403)) throw directErr; // real auth error, don't mask it behind proxy noise
+      return fetchAlertsViaProxyChain(url);
+    });
+  }
+
   function fetchAlerts(){
     if(!state.token){
+      lastAlertsForRender = []; lastDataOkForRender = false;
       renderCompass([], false);
       return;
     }
-    fetchWithTimeout("https://api.alerts.in.ua/v1/alerts/active.json?token=" + encodeURIComponent(state.token), 10000)
-      .then(function(res){
-        if(!res.ok) throw new Error("HTTP " + res.status);
-        return res.json();
-      })
+    fetchAlertsJson("https://api.alerts.in.ua/v1/alerts/active.json?token=" + encodeURIComponent(state.token))
       .then(function(data){
         var alerts = data && data.alerts ? data.alerts : (Array.isArray(data) ? data : []);
+        lastAlertsForRender = alerts; lastDataOkForRender = true;
         renderCompass(alerts, true);
       })
       .catch(function(err){
+        lastAlertsForRender = []; lastDataOkForRender = false;
         renderCompass([], false);
-        compassNote.textContent = "Не вдалося отримати дані з alerts.in.ua (можливо, блокування CORS або хибний токен). Мапа праворуч показує все наживо.";
+        compassNote.textContent = (err && (err.httpStatus === 401 || err.httpStatus === 403))
+          ? "Токен alerts.in.ua не прийнято (код " + err.httpStatus + "). Перевір його в Налаштуваннях."
+          : "Не вдалося отримати дані з alerts.in.ua (пряме з'єднання блокує CORS, резервні проксі теж не відповіли зараз). Спробує ще раз за хвилину. Мапа праворуч показує все наживо.";
       });
   }
 
@@ -1181,6 +1349,164 @@
     if(fetchTimer) clearInterval(fetchTimer);
     fetchAlerts();
     fetchTimer = setInterval(fetchAlerts, 60000);
+  }
+
+  /* ---------- NEPTUN (Dron Alerts) live-target overlay ----------
+     neptun.in.ua is the site behind the "Dron Alerts" app (confirmed via
+     its App Store listing: developer site = neptun.in.ua). Verified live
+     in a real browser on 2026-09-01: GET https://neptun.in.ua/api/v1/threats
+     returns real-time settlement-level threat tracks (lat/lon, type,
+     heading, confidence) with open CORS (fetch from a foreign origin
+     returns response.type "cors" with a readable JSON body, no key
+     needed) — this is a genuine, documented, working public API, not
+     a guess. Schema per https://neptun.in.ua/developers. Still opt-out
+     (not a hard dependency): if the endpoint ever changes shape or goes
+     down, everything here fails silently and the rest of the dashboard
+     (alerts.in.ua compass, map, Telegram) is completely unaffected. */
+  var neptunTimer = null;
+  var neptunOk = false;
+  var neptunThreats = []; // point-plottable (non-areaOnly) threats
+  var neptunNearest = null; // {title, dist} — closest one, for the compass note
+  var neptunNearList = []; // top few closest — for the readout list under the compass
+
+  function setNeptunBadge(status){
+    // status: "ok" | "fail" | null(off)
+    var badge = document.getElementById("neptunBadge");
+    var legendItem = document.getElementById("neptunLegendItem");
+    if(!badge) return;
+    if(status === null){
+      badge.style.display = "none";
+      if(legendItem) legendItem.style.display = "none";
+      return;
+    }
+    badge.style.display = "inline";
+    badge.textContent = status === "ok" ? "NEPTUN ●" : "NEPTUN ○";
+    badge.style.color = status === "ok" ? "#ff6b3d" : "var(--text-faint)";
+    if(legendItem) legendItem.style.display = status === "ok" ? "inline-flex" : "none";
+    var hint = document.getElementById("neptunStatusHint");
+    if(hint){
+      hint.textContent = status === "ok"
+        ? "Підключено: живі дані NEPTUN (" + neptunThreats.length + " ціль(і) з координатами) — позначені на флюгері жовтогарячими трикутниками з напрямком руху, де він відомий."
+        : "Зараз не вдалося отримати дані NEPTUN (сайт міг тимчасово бути недоступний або обмежити запит). Флюгер і без цього працює на alerts.in.ua — спробує ще раз за 20с.";
+    }
+  }
+
+  function fetchNeptun(){
+    if(!state.neptunEnabled){
+      neptunOk = false; neptunThreats = []; neptunNearest = null; neptunNearList = [];
+      setNeptunBadge(null);
+      renderNeptunNearList();
+      return;
+    }
+    fetchWithTimeout("https://neptun.in.ua/api/v1/threats", 8000)
+      .then(function(res){
+        if(!res.ok) throw new Error("HTTP " + res.status);
+        return res.json();
+      })
+      .then(function(data){
+        var list = (data && Array.isArray(data.threats)) ? data.threats : null;
+        if(!list) throw new Error("unexpected NEPTUN response shape");
+        var parsed = [];
+        list.forEach(function(t){
+          if(!t || t.status === "resolved") return;
+          var lat = parseFloat(t.lat), lon = parseFloat(t.lon);
+          if(isNaN(lat) || isNaN(lon)) return;
+          // areaOnly: only an oblast is known — lat/lon is that oblast's centroid,
+          // not a real place. NEPTUN's own docs say not to plot this as a point
+          // or compute distance/bearing from it, so we skip it entirely here.
+          if(t.areaOnly) return;
+          parsed.push({
+            lat: lat, lon: lon,
+            type: t.type || "uav",
+            title: t.title || t.type || "ціль",
+            place: t.locality || t.district || t.region || "",
+            heading: (t.heading != null ? t.heading : null),
+            advisory: !!t.advisory,
+            confidence: t.confidenceLevel || t.displayConfidence || null
+          });
+        });
+        neptunThreats = parsed;
+        neptunOk = true;
+        var city = currentCity();
+        var ranked = parsed
+          .filter(function(t){ return !t.advisory; }) // observation only, not a "how close" signal
+          .map(function(t){
+            return {
+              title: t.title, place: t.place,
+              dist: haversineKm(city.lat, city.lon, t.lat, t.lon),
+              brng: bearingDeg(city.lat, city.lon, t.lat, t.lon)
+            };
+          })
+          .sort(function(a,b){ return a.dist - b.dist; });
+        neptunNearest = ranked.length ? ranked[0] : null;
+        neptunNearList = ranked.slice(0, 3);
+        setNeptunBadge("ok");
+        renderNeptunNearList();
+        renderCompass(lastAlertsForRender, lastDataOkForRender);
+      })
+      .catch(function(err){
+        neptunOk = false; neptunThreats = []; neptunNearest = null; neptunNearList = [];
+        setNeptunBadge("fail");
+        renderNeptunNearList();
+      });
+  }
+
+  function renderNeptunNearList(){
+    var el = document.getElementById("neptunNearList");
+    if(!el) return;
+    if(!state.neptunEnabled || !neptunOk || !neptunNearList.length){
+      el.style.display = "none";
+      el.innerHTML = "";
+      return;
+    }
+    el.style.display = "block";
+    el.innerHTML = "<div style=\"color:var(--text-faint); font-size:10px; letter-spacing:.04em; margin-bottom:2px;\">НАЙБЛИЖЧІ ЦІЛІ (NEPTUN) — від «" + currentCity().name + "»</div>" +
+      neptunNearList.map(function(t){
+        return "<div>▸ " + escapeHtml(t.title) + (t.place ? " · " + escapeHtml(t.place) : "") +
+          " · <b style=\"color:#ff6b3d;\">" + Math.round(t.dist) + " км</b> · " + bearingToLabel(t.brng) + "</div>";
+      }).join("");
+  }
+
+  // Small always-on NEPTUN map living right in the compass panel — separate
+  // from the big map panel's alerts.in.ua/NEPTUN toggle, so you get the
+  // abstract precise-distance dial AND a real geographic view (with NEPTUN's
+  // own live flight trails) in the same glance.
+  //
+  // Deliberately NOT using the oversized-iframe crop-zoom trick the big map
+  // panel uses: tested it live against neptun.in.ua and it's a bad fit for
+  // their map specifically — it's WebGL-based (MapLibre), and Chrome
+  // throttles rendering/tile-loading hard for an iframe whose element is
+  // mostly positioned outside the visible viewport (which is exactly what a
+  // crop-zoomed oversized iframe is under the hood, even though the *visible
+  // crop* sits on-screen). Confirmed: a plain, naturally-sized iframe painted
+  // real map tiles in ~3s; the same map cropped from a 1.5–3x oversized frame
+  // was still blank 12–20s later. So this stays natural-sized (no crop, no
+  // offset) — NEPTUN's own default whole-Ukraine view, pannable/zoomable by
+  // hand since it's a real interactive map, not auto-centered on the city.
+  function renderNeptunMiniMap(){
+    var wrap = document.getElementById("neptunMiniMap");
+    if(!wrap) return;
+    if(!state.neptunEnabled){ wrap.style.display = "none"; return; }
+    wrap.style.display = "block";
+    var city = currentCity();
+    var iframe = document.getElementById("neptunMiniIframe");
+    if(!iframe){
+      iframe = document.createElement("iframe");
+      iframe.id = "neptunMiniIframe";
+      iframe.src = "https://neptun.in.ua/embed/map?lang=uk";
+      iframe.title = "NEPTUN — карта цілей";
+      iframe.style.cssText = "position:absolute; left:0; top:0; width:100%; height:100%; border:0;";
+      wrap.appendChild(iframe);
+    }
+    var lbl = document.getElementById("neptunMiniMapLabel");
+    if(lbl) lbl.textContent = "NEPTUN — рухай/масштабуй самостійно (шукай " + city.name + ")";
+  }
+
+  function scheduleNeptun(){
+    if(neptunTimer){ clearInterval(neptunTimer); neptunTimer = null; }
+    if(!state.neptunEnabled){ setNeptunBadge(null); return; }
+    fetchNeptun();
+    neptunTimer = setInterval(fetchNeptun, 20000);
   }
 
   /* ---------- Sound engine (synthesised, no audio files needed) ---------- */
@@ -1597,21 +1923,34 @@
   var MAP_ZOOM_DEFAULT = 2.4; // how many times larger than the panel the iframe is rendered
   var panModeActive = false;
 
+  var MAP_SOURCES = {
+    alerts: {src: "https://alerts.in.ua/", title: "Мапа тривог України", label: "Мапа тривог", fullscreen: "https://alerts.in.ua/", toggleLabel: "🎯 NEPTUN"},
+    neptun: {src: "https://neptun.in.ua/embed/map?lang=uk", title: "Карта повітряних тривог — NEPTUN", label: "NEPTUN — цілі наживо", fullscreen: "https://neptun.in.ua/", toggleLabel: "🚨 alerts.in.ua"}
+  };
+
   function renderMap(){
     mapFrameHolder.innerHTML = "";
+    var src = MAP_SOURCES[state.mapSource] || MAP_SOURCES.alerts;
     var iframe = document.createElement("iframe");
-    iframe.src = "https://alerts.in.ua/";
-    iframe.title = "Мапа тривог України";
+    iframe.src = src.src;
+    iframe.title = src.title;
     iframe.loading = "lazy";
     iframe.id = "mapIframe";
     mapFrameHolder.appendChild(iframe);
+    var titleLabel = document.getElementById("mapTitleLabel");
+    var srcBtn = document.getElementById("mapSourceBtn");
+    var fsLink = document.getElementById("mapFullscreenLink");
+    if(titleLabel) titleLabel.textContent = src.label;
+    if(srcBtn) srcBtn.textContent = src.toggleLabel;
+    if(fsLink) fsLink.href = src.fullscreen;
     applyMapFocus();
   }
 
   function cityMapConfig(cityId){
     if(!state.mapManualByCity) state.mapManualByCity = {};
-    if(!state.mapManualByCity[cityId]) state.mapManualByCity[cityId] = {dx:0, dy:0, zoom:MAP_ZOOM_DEFAULT};
-    return state.mapManualByCity[cityId];
+    var key = state.mapSource === "neptun" ? (cityId + ":neptun") : cityId;
+    if(!state.mapManualByCity[key]) state.mapManualByCity[key] = {dx:0, dy:0, zoom:MAP_ZOOM_DEFAULT};
+    return state.mapManualByCity[key];
   }
 
   function applyMapFocus(){
@@ -1642,6 +1981,12 @@
     iframe.style.left = leftPct + "%";
     iframe.style.top = topPct + "%";
   }
+
+  document.getElementById("mapSourceBtn").addEventListener("click", function(){
+    state.mapSource = state.mapSource === "neptun" ? "alerts" : "neptun";
+    saveState();
+    renderMap();
+  });
 
   mapFocusBtn.addEventListener("click", function(){
     state.mapAutoFocus = !state.mapAutoFocus;
@@ -1734,6 +2079,7 @@
   var soundKeywordSwitch = document.getElementById("soundKeywordSwitch");
   var volumeInput = document.getElementById("volumeInput");
   var testSoundBtn = document.getElementById("testSoundBtn");
+  var neptunSwitch = document.getElementById("neptunSwitch");
 
   function openSettings(){
     tokenInput.value = state.token || "";
@@ -1746,11 +2092,13 @@
     soundKeywordSwitch.classList.toggle("on", !!state.soundOnKeyword);
     soundKeywordSwitch.setAttribute("aria-checked", !!state.soundOnKeyword);
     volumeInput.value = state.soundVolume != null ? state.soundVolume : 0.6;
+    neptunSwitch.classList.toggle("on", !!state.neptunEnabled);
+    neptunSwitch.setAttribute("aria-checked", !!state.neptunEnabled);
     cityNameInput.value = ""; cityLatInput.value = ""; cityLonInput.value = "";
     overlay.classList.add("open");
   }
 
-  [soundAlertSwitch, soundKeywordSwitch].forEach(function(sw){
+  [soundAlertSwitch, soundKeywordSwitch, neptunSwitch].forEach(function(sw){
     sw.addEventListener("click", function(){
       var on = !sw.classList.contains("on");
       sw.classList.toggle("on", on);
@@ -1875,28 +2223,20 @@
       return;
     }
     tokenTestResult.style.color = "var(--text-faint)";
-    tokenTestResult.textContent = "Перевіряю…";
-    fetchWithTimeout("https://api.alerts.in.ua/v1/alerts/active.json?token=" + encodeURIComponent(tok), 8000)
-      .then(function(res){
-        if(res.status === 401 || res.status === 403){
-          tokenTestResult.style.color = "var(--danger)";
-          tokenTestResult.textContent = "❌ Токен не прийнято (код " + res.status + ") — перевір, чи скопійований повністю.";
-          return;
-        }
-        if(!res.ok){
-          tokenTestResult.style.color = "var(--danger)";
-          tokenTestResult.textContent = "❌ Сервер відповів помилкою (код " + res.status + ").";
-          return;
-        }
-        return res.json().then(function(data){
-          var alerts = data && data.alerts ? data.alerts : (Array.isArray(data) ? data : []);
-          tokenTestResult.style.color = "var(--accent)";
-          tokenTestResult.textContent = "✅ Токен робочий. Зараз " + alerts.length + " активних тривог по країні.";
-        });
+    tokenTestResult.textContent = "Перевіряю (пряме з'єднання, потім резервні проксі, якщо треба)…";
+    fetchAlertsJson("https://api.alerts.in.ua/v1/alerts/active.json?token=" + encodeURIComponent(tok))
+      .then(function(data){
+        var alerts = data && data.alerts ? data.alerts : (Array.isArray(data) ? data : []);
+        tokenTestResult.style.color = "var(--accent)";
+        tokenTestResult.textContent = "✅ Токен робочий. Зараз " + alerts.length + " активних тривог по країні" + (state.alertsProxyPref ? " (через проксі " + state.alertsProxyPref + " — пряме з'єднання блокує CORS, це нормально)" : "") + ".";
       })
-      .catch(function(){
+      .catch(function(err){
         tokenTestResult.style.color = "var(--danger)";
-        tokenTestResult.textContent = "❌ З'єднатися не вдалось. Найімовірніше — блокування CORS у цьому браузері, а не сам токен. alerts.in.ua прямо радить проксі через власний сервер; у файлі, відкритому локально, це іноді все одно працює, іноді ні — по-різному в різних браузерах.";
+        if(err && (err.httpStatus === 401 || err.httpStatus === 403)){
+          tokenTestResult.textContent = "❌ Токен не прийнято (код " + err.httpStatus + ") — перевір, чи скопійований повністю.";
+        } else {
+          tokenTestResult.textContent = "❌ Не вдалося з'єднатися ні напряму, ні через жоден із резервних проксі зараз. Спробуй ще раз за хвилину — публічні проксі часом просто перевантажені.";
+        }
       });
   });
 
@@ -1920,6 +2260,7 @@
     state.soundOnAlert = soundAlertSwitch.classList.contains("on");
     state.soundOnKeyword = soundKeywordSwitch.classList.contains("on");
     state.soundVolume = parseFloat(volumeInput.value) || 0;
+    state.neptunEnabled = neptunSwitch.classList.contains("on");
 
     var cn = cityNameInput.value.trim();
     var clat = parseFloat(cityLatInput.value);
@@ -1936,6 +2277,8 @@
     state.activeChannelIndex = 0;
     closeSettings();
     onCityChanged();
+    scheduleNeptun();
+    renderNeptunMiniMap();
   });
 
   /* ---------- Resizable panels ---------- */
@@ -1985,6 +2328,8 @@
     renderTelegram();
     applyAutoRotate();
     applyMapFocus();
+    scheduleNeptun(); // re-anchor NEPTUN distances/bearings to the new point
+    renderNeptunMiniMap();
   }
 
   /* ---------- Boot ---------- */
@@ -1997,6 +2342,8 @@
   renderTelegram();
   applyAutoRotate();
   scheduleFetch();
+  scheduleNeptun();
+  renderNeptunMiniMap();
 
 })();
 </script>
