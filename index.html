@@ -868,11 +868,18 @@
     {name:"м. Севастополь", key:"севастопол", lat:44.6054, lon:33.5220}
   ];
 
+  // Order matters: index 0 is the "primary" tab a city opens on and the one
+  // the auto-fallback logic (see applyTgAutoFallback) prefers whenever it's
+  // actually delivering messages. Kyiv is a fixed, hand-picked trio per
+  // explicit request — no auto-fallback preference among them, just 3 tabs.
+  // Everywhere else: that city/oblast's own channel goes first (the
+  // "primary"), with kpszsu — the one source that's always reliable — as
+  // the fallback used only when the primary isn't answering.
   var DEFAULT_CHANNELS_BY_CITY = {
-    kyiv:     ["kpszsu", "monitorwarr", "kyivcityofficial"],
-    irpin:    ["kpszsu", "monitorwarr", "kyivcityofficial"],
-    mykolaiv: ["kpszsu", "mykolaivskaODA"],
-    odesa:    ["kpszsu", "alertOdessa"]
+    kyiv:     ["kpszsu", "mon1tor_ua", "monitorwarr"],
+    irpin:    ["kpszsu", "monitorwarr"],
+    mykolaiv: ["mykolaivskaODA", "kpszsu"],
+    odesa:    ["alertOdessa", "kpszsu"]
   };
 
   /* ---------- State / persistence ---------- */
@@ -900,14 +907,16 @@
       tgCache: {},
       tgProxyPref: {},
       alertsProxyPref: null,
-      channelsCuratedVersion: 2,
+      channelsCuratedVersion: 3,
       hereLat: null,
       hereLon: null,
+      hereAccuracy: null,
       hereUpdatedAt: null,
       neptunEnabled: true,
       neptunDefaultApplied: true,
       compassMapFraction: 0.48,
-      compassSplitDefaultApplied: true
+      compassSplitDefaultApplied: true,
+      mapZoomDefaultVersion: 2
     };
   }
 
@@ -916,6 +925,11 @@
       var raw = localStorage.getItem(STORE_KEY);
       if(!raw) return defaultState();
       var parsed = JSON.parse(raw);
+      // Capture this before the fill-loop below can populate it from
+      // defaultState()'s (already-current) value — otherwise a saved state
+      // that simply never had this key looks indistinguishable from one
+      // that's already migrated, and the migration silently never runs.
+      var rawMapZoomDefaultVersion = parsed.mapZoomDefaultVersion;
       var d = defaultState();
       for(var k in d){ if(!(k in parsed)) parsed[k] = d[k]; }
       // One-time curated refresh of the built-in cities' default channel
@@ -925,6 +939,16 @@
           parsed.channelsByCity[cid] = DEFAULT_CHANNELS_BY_CITY[cid].slice();
         });
         parsed.channelsCuratedVersion = 2;
+      }
+      // v3: Kyiv's fixed trio (official + mon1tor_ua + monitorwarr) and,
+      // for every other built-in city, reordered so that city/oblast's own
+      // channel leads (the auto-fallback logic now prefers it) with kpszsu
+      // demoted to fallback-only.
+      if(!(parsed.channelsCuratedVersion >= 3)){
+        Object.keys(DEFAULT_CHANNELS_BY_CITY).forEach(function(cid){
+          parsed.channelsByCity[cid] = DEFAULT_CHANNELS_BY_CITY[cid].slice();
+        });
+        parsed.channelsCuratedVersion = 3;
       }
       // One-time: NEPTUN's API got verified live (real endpoint, real CORS,
       // real data) after it shipped as an opt-in toggle default-off. Turn
@@ -940,6 +964,24 @@
       if(!parsed.compassSplitDefaultApplied){
         parsed.compassMapFraction = 0.48;
         parsed.compassSplitDefaultApplied = true;
+      }
+      // v2: the alerts.in.ua crop-zoom default moved from 2.4 (country/
+      // multi-oblast scale) to 3.9 (one city + its own oblast). Can't
+      // reference MAP_ZOOM_DEFAULT here — it's assigned later in the script,
+      // after this runs — so 3.9 is repeated as a literal; keep both in
+      // sync if that constant ever changes again. Only touches per-city
+      // entries that still look untouched (old default zoom, no manual
+      // pan) so a real manual adjustment is never overridden.
+      if(!(rawMapZoomDefaultVersion >= 2)){
+        if(parsed.mapManualByCity){
+          Object.keys(parsed.mapManualByCity).forEach(function(key){
+            var cfg = parsed.mapManualByCity[key];
+            if(cfg && cfg.dx === 0 && cfg.dy === 0 && cfg.zoom === 2.4){
+              cfg.zoom = 3.9;
+            }
+          });
+        }
+        parsed.mapZoomDefaultVersion = 2;
       }
       return parsed;
     }catch(e){ return defaultState(); }
@@ -1014,33 +1056,44 @@
   var hereBtn = document.getElementById("hereBtn");
   var hereTimer = null;
 
+  function applyHerePosition(pos){
+    state.hereLat = pos.coords.latitude;
+    state.hereLon = pos.coords.longitude;
+    state.hereAccuracy = pos.coords.accuracy != null ? Math.round(pos.coords.accuracy) : null;
+    state.hereUpdatedAt = Date.now();
+    state.cityId = HERE_ID;
+    if(!state.channelsByCity[HERE_ID]) state.channelsByCity[HERE_ID] = ["kpszsu", "monitorwarr"];
+    state.activeChannelIndex = 0;
+    saveState();
+    updateHereBtn();
+    onCityChanged();
+    armHereAutoRefresh();
+  }
+
   function geolocateHere(silent){
     if(!navigator.geolocation){
       if(!silent) alert("Цей браузер не підтримує визначення місцезнаходження.");
       return;
     }
     hereBtn.textContent = "📍 визначаю…";
-    navigator.geolocation.getCurrentPosition(function(pos){
-      state.hereLat = pos.coords.latitude;
-      state.hereLon = pos.coords.longitude;
-      state.hereUpdatedAt = Date.now();
-      state.cityId = HERE_ID;
-      if(!state.channelsByCity[HERE_ID]) state.channelsByCity[HERE_ID] = ["kpszsu", "monitorwarr"];
-      state.activeChannelIndex = 0;
-      saveState();
-      updateHereBtn();
-      onCityChanged();
-      armHereAutoRefresh();
-    }, function(err){
-      updateHereBtn();
-      if(!silent) alert("Не вдалося визначити місцезнаходження: " + (err && err.message ? err.message : "доступ відхилено") + ".");
-    }, {enableHighAccuracy:true, timeout:12000});
+    // High-accuracy GPS fix first (real GPS chip if there is one — a phone
+    // or a laptop with one — can take longer than the old 12s to get a cold
+    // fix, so this gets a more forgiving 20s). If that genuinely fails or
+    // times out, fall back once to a coarser (Wi-Fi/IP-based) fix rather
+    // than just giving up — worse precision beats no location at all.
+    navigator.geolocation.getCurrentPosition(applyHerePosition, function(err){
+      navigator.geolocation.getCurrentPosition(applyHerePosition, function(err2){
+        updateHereBtn();
+        if(!silent) alert("Не вдалося визначити місцезнаходження: " + (err2 && err2.message ? err2.message : "доступ відхилено") + ".");
+      }, {enableHighAccuracy:false, timeout:10000, maximumAge:60000});
+    }, {enableHighAccuracy:true, timeout:20000, maximumAge:0});
   }
 
   function updateHereBtn(){
     if(state.cityId === HERE_ID && state.hereLat != null){
       var ago = state.hereUpdatedAt ? Math.round((Date.now()-state.hereUpdatedAt)/60000) : null;
-      hereBtn.textContent = "📍 оновити" + (ago != null ? " (" + ago + " хв тому)" : "");
+      var acc = state.hereAccuracy != null ? ", ±" + (state.hereAccuracy >= 1000 ? (state.hereAccuracy/1000).toFixed(1) + " км" : state.hereAccuracy + " м") : "";
+      hereBtn.textContent = "📍 оновити" + (ago != null ? " (" + ago + " хв тому" + acc + ")" : "");
       hereBtn.classList.add("on");
     } else {
       hereBtn.textContent = "📍 моє місце";
@@ -1571,6 +1624,13 @@
     });
   }
 
+  // City centroids only need a whole-city view; the GPS "моє місце" point
+  // is an exact address, so it earns a real district/neighbourhood zoom —
+  // close enough to make the extra GPS precision actually visible.
+  function neptunMiniMapZoomFor(city){
+    return (city && city.id === HERE_ID) ? 13.5 : 8.6;
+  }
+
   function ensureNeptunMiniMap(){
     if(neptunMiniMapInstance || typeof maplibregl === "undefined") return neptunMiniMapInstance;
     var city = currentCity();
@@ -1579,7 +1639,7 @@
         container: "neptunMiniMapCanvas",
         style: "https://tiles.openfreemap.org/styles/liberty",
         center: [city.lon, city.lat],
-        zoom: 8.6,
+        zoom: neptunMiniMapZoomFor(city),
         attributionControl: false,
         cooperativeGestures: false
       });
@@ -1605,7 +1665,7 @@
     var city = currentCity();
     var map = ensureNeptunMiniMap();
     if(map){
-      map.flyTo({center: [city.lon, city.lat], zoom: 8.6, duration: 800, essential: true});
+      map.flyTo({center: [city.lon, city.lat], zoom: neptunMiniMapZoomFor(city), duration: 800, essential: true});
       queueNeptunMiniMapResize();
       renderNeptunMiniMapMarkers();
     }
@@ -1764,6 +1824,12 @@
   var tgCache = state.tgCache || {}; // channel -> {ts, messages} — seeded from last session
   var tgStatus = {}; // channel -> "loading"|"ok"|"error"
   var tgFetchToken = 0;
+  // Auto-fallback: prefer channel 0 (the "primary" for this city) as long as
+  // it's actually delivering; hop to the next working one only while it
+  // isn't. Reset to true on every city change / channel-list change, and
+  // switched off the moment the person picks a tab themselves, so it never
+  // fights a manual choice.
+  var tgAutoFallback = true;
 
   var ALERT_KEYWORDS = ["шахед","бпла","безпілот","реактбпла","ракета","балістик","крилат",
     "приліт","вибух","тривога","бандероль","калібр","іскандер","град","мрлс","дрон"];
@@ -1935,6 +2001,46 @@
     return channels[state.activeChannelIndex] || null;
   }
 
+  // Switches the visible tab without rebuilding tabs or re-triggering a
+  // fresh poll round — shared by manual tab clicks, the auto-rotate timer,
+  // and the auto-fallback logic below.
+  function setActiveChannel(index){
+    var channels = currentChannels();
+    if(index < 0 || index >= channels.length || index === state.activeChannelIndex) return;
+    state.activeChannelIndex = index;
+    saveState();
+    tgTabs.querySelectorAll(".tg-tab").forEach(function(t, i){ t.classList.toggle("active", i === index); });
+    var active = activeChannelName();
+    var cached = tgCache[active];
+    if(cached) renderTgMessages(active, cached.messages, cached.ts);
+    else loadChannel(active, false);
+  }
+
+  // "Use this city's own channel as the main one, only switch if it's not
+  // working": index 0 in a city's channel list is that primary. This keeps
+  // the visible tab on the first channel that's actually delivering
+  // messages, preferring lower indexes — so it snaps back to the primary
+  // the moment it recovers — but never fights a tab the person picked by
+  // hand (tgAutoFallback goes false on manual click) or auto-rotate mode.
+  function applyTgAutoFallback(){
+    if(!tgAutoFallback || state.autoRotate) return;
+    var channels = currentChannels();
+    if(channels.length < 2) return;
+    var bestIndex = -1;
+    for(var i = 0; i < channels.length; i++){
+      if(tgStatus[channels[i]] === "ok"){ bestIndex = i; break; }
+    }
+    if(bestIndex === -1){
+      // Nobody has confirmed "ok" yet — stay put on whichever channel isn't
+      // already a known failure, rather than jumping around while things
+      // are still loading.
+      for(var j = 0; j < channels.length; j++){
+        if(tgStatus[channels[j]] !== "error"){ bestIndex = j; break; }
+      }
+    }
+    if(bestIndex !== -1) setActiveChannel(bestIndex);
+  }
+
   function setTabDot(channel, status){
     tgStatus[channel] = status;
     var dot = tgTabs.querySelector('.tg-tab[data-channel="' + CSS.escape(channel) + '"] .tg-tab-dot');
@@ -1966,11 +2072,13 @@
         state.tgProxyPref[channel] = result.proxyName;
         saveState();
         setTabDot(channel, "ok");
+        applyTgAutoFallback();
         scanForNewAlerts(channel, messages);
         if(channel === activeChannelName()) renderTgMessages(channel, messages, ts);
       })
       .catch(function(){
         setTabDot(channel, "error");
+        applyTgAutoFallback();
         if(channel !== activeChannelName() || myToken !== tgFetchToken) return;
         if(cached){
           renderTgMessages(channel, cached.messages, cached.ts, true);
@@ -2003,6 +2111,9 @@
       return;
     }
     if(state.activeChannelIndex >= channels.length) state.activeChannelIndex = 0;
+    // Fresh city / fresh channel list: trust the primary (tab 0) again until
+    // it proves it isn't working, or the person picks a different tab.
+    tgAutoFallback = true;
 
     channels.forEach(function(ch, i){
       var tab = document.createElement("button");
@@ -2016,6 +2127,7 @@
       tab.appendChild(dot);
       tab.appendChild(label);
       tab.addEventListener("click", function(){
+        tgAutoFallback = false;
         state.activeChannelIndex = i;
         saveState();
         renderTelegram();
@@ -2071,7 +2183,12 @@
   // Ukraine's rough bounding box, used only to point the crop-zoom at the
   // right neighbourhood of alerts.in.ua's own map — approximate on purpose.
   var UA_BOUNDS = {lonMin:22.0, lonMax:40.6, latMin:44.2, latMax:52.5};
-  var MAP_ZOOM_DEFAULT = 2.4; // how many times larger than the panel the iframe is rendered
+  // How many times larger than the panel the iframe is rendered, for the
+  // crop-zoom trick. 2.4 crops down to ~42% of Ukraine's width — several
+  // oblasts' worth, more country-wide than "this city and its own oblast".
+  // ~3.9 crops to ~26% (~350km), which comfortably frames one oblast around
+  // its city without running most border/coastal oblasts off the edge.
+  var MAP_ZOOM_DEFAULT = 3.9;
   var panModeActive = false;
 
   var MAP_SOURCES = {
