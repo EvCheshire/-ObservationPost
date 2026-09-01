@@ -246,13 +246,23 @@
   /* ===== Compass panel ===== */
   #compassWrap{
     flex:1;
+    display:grid;
+    grid-template-rows:1fr;
+    padding:14px;
+    gap:10px;
+    min-height:0;
+    width:100%;
+  }
+  #compassDialSection{
     display:flex;
     flex-direction:column;
     align-items:center;
     justify-content:center;
-    padding:14px;
     gap:10px;
     min-height:0;
+    min-width:0;
+    overflow-y:auto;
+    overflow-x:hidden;
   }
   #compassSvgHolder{
     flex:1;
@@ -264,9 +274,28 @@
   }
   #compassSvgHolder svg{max-width:100%; max-height:100%;}
 
+  .row-resizer{
+    background:var(--panel-raised);
+    cursor:row-resize;
+    position:relative;
+    display:none;
+    border-radius:3px;
+  }
+  .row-resizer::after{
+    content:'';
+    position:absolute; top:50%; left:50%;
+    transform:translate(-50%,-50%);
+    width:28px; height:2px;
+    background:var(--line-soft);
+    border-radius:2px;
+  }
+  .row-resizer:hover, .row-resizer.dragging{background:var(--accent-dim);}
+  .row-resizer:hover::after, .row-resizer.dragging::after{background:var(--accent);}
+
   #neptunMiniMap{
-    flex:0 0 240px;
     width:100%;
+    height:100%;
+    min-height:0;
     border-radius:8px;
     overflow:hidden;
     position:relative;
@@ -593,15 +622,18 @@
       </div>
       <div class="panel-body">
         <div id="compassWrap">
-          <div id="compassSvgHolder"></div>
-          <div class="legend">
-            <span><i style="background:var(--accent)"></i>Спокійно</span>
-            <span><i style="background:var(--warn)"></i>Тривога поруч</span>
-            <span><i style="background:var(--danger)"></i>Тривога тут</span>
-            <span id="neptunLegendItem" style="display:none;"><i style="background:#ff6b3d"></i>NEPTUN: ціль наживо</span>
+          <div id="compassDialSection">
+            <div id="compassSvgHolder"></div>
+            <div class="legend">
+              <span><i style="background:var(--accent)"></i>Спокійно</span>
+              <span><i style="background:var(--warn)"></i>Тривога поруч</span>
+              <span><i style="background:var(--danger)"></i>Тривога тут</span>
+              <span id="neptunLegendItem" style="display:none;"><i style="background:#ff6b3d"></i>NEPTUN: ціль наживо</span>
+            </div>
+            <div class="compass-note" id="compassNote"></div>
+            <div id="neptunNearList" style="display:none; font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--text-dim); line-height:1.7; margin-top:4px;"></div>
           </div>
-          <div class="compass-note" id="compassNote"></div>
-          <div id="neptunNearList" style="display:none; font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--text-dim); line-height:1.7; margin-top:4px;"></div>
+          <div class="row-resizer" id="compassRowResizer" role="separator" aria-orientation="horizontal" aria-label="Змінити розмір карти NEPTUN" title="Потягни, щоб змінити розмір карти"></div>
           <div id="neptunMiniMap"><span id="neptunMiniMapLabel">NEPTUN — карта</span></div>
         </div>
         <div id="ppoTip">Бачиш або чуєш загрозу з неба — повідом через застосунок «єППО» або на гарячу лінію 15-39.</div>
@@ -853,7 +885,9 @@
       hereLon: null,
       hereUpdatedAt: null,
       neptunEnabled: true,
-      neptunDefaultApplied: true
+      neptunDefaultApplied: true,
+      compassMapFraction: 0.48,
+      compassSplitDefaultApplied: true
     };
   }
 
@@ -879,6 +913,13 @@
       if(!parsed.neptunDefaultApplied){
         parsed.neptunEnabled = true;
         parsed.neptunDefaultApplied = true;
+      }
+      // One-time default: give the NEPTUN mini-map roughly half the compass
+      // panel's height instead of the old fixed 240px strip. After this runs
+      // once, a manual drag of the row-resizer sticks (never overridden again).
+      if(!parsed.compassSplitDefaultApplied){
+        parsed.compassMapFraction = 0.48;
+        parsed.compassSplitDefaultApplied = true;
       }
       return parsed;
     }catch(e){ return defaultState(); }
@@ -1483,9 +1524,22 @@
   // was still blank 12–20s later. So this stays natural-sized (no crop, no
   // offset) — NEPTUN's own default whole-Ukraine view, pannable/zoomable by
   // hand since it's a real interactive map, not auto-centered on the city.
+  //
+  // Auto-centering on the selected city was investigated directly against
+  // NEPTUN's live client code: their embed page does expose an internal
+  // command bridge (flyTo/showMe/etc, found as window.__neptunBridge in
+  // their bundle), but it's wired only for their own React Native app's
+  // WebView (injected same-window JS) — the embed page has no
+  // window.addEventListener("message", ...) handler, so a cross-origin
+  // <iframe> like ours has no supported way to call it. There is no
+  // lat/lon/city query-param either (tested live: adding ?lat=&lon=&city=
+  // to the embed URL has no effect on the initial view). So there is
+  // currently no real way to auto-center this map on the chosen city —
+  // the label below tells you what to look for instead.
   function renderNeptunMiniMap(){
     var wrap = document.getElementById("neptunMiniMap");
     if(!wrap) return;
+    applyCompassRowFractions();
     if(!state.neptunEnabled){ wrap.style.display = "none"; return; }
     wrap.style.display = "block";
     var city = currentCity();
@@ -2320,6 +2374,51 @@
       window.addEventListener("pointerup", onUp);
     });
   });
+
+  /* ---------- Compass panel split (dial vs NEPTUN mini-map) ---------- */
+  var compassWrapEl = document.getElementById("compassWrap");
+  var compassRowResizer = document.getElementById("compassRowResizer");
+  function applyCompassRowFractions(){
+    if(!compassWrapEl) return;
+    if(!state.neptunEnabled){
+      compassWrapEl.style.gridTemplateRows = "1fr";
+      if(compassRowResizer) compassRowResizer.style.display = "none";
+      return;
+    }
+    if(compassRowResizer) compassRowResizer.style.display = "block";
+    var mapFrac = Math.min(Math.max(state.compassMapFraction || 0.48, 0.18), 0.78);
+    var dialFrac = 1 - mapFrac;
+    compassWrapEl.style.gridTemplateRows = dialFrac + "fr 8px " + mapFrac + "fr";
+  }
+  if(compassRowResizer){
+    compassRowResizer.addEventListener("pointerdown", function(e){
+      compassRowResizer.setPointerCapture(e.pointerId);
+      compassRowResizer.classList.add("dragging");
+      var startY = e.clientY;
+      var startFrac = state.compassMapFraction || 0.48;
+      var wrapHeight = compassWrapEl.getBoundingClientRect().height;
+
+      function onMove(ev){
+        var deltaFrac = wrapHeight ? (ev.clientY - startY) / wrapHeight : 0;
+        // Handle sits between the dial section (top) and the map (bottom):
+        // dragging it down grows the dial, so the map's fraction shrinks.
+        var newMapFrac = startFrac - deltaFrac;
+        if(newMapFrac < 0.18) newMapFrac = 0.18;
+        if(newMapFrac > 0.78) newMapFrac = 0.78;
+        state.compassMapFraction = newMapFrac;
+        applyCompassRowFractions();
+      }
+      function onUp(ev){
+        compassRowResizer.releasePointerCapture(e.pointerId);
+        compassRowResizer.classList.remove("dragging");
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        saveState();
+      }
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+    });
+  }
 
   /* ---------- City change orchestration ---------- */
   function onCityChanged(){
