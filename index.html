@@ -878,7 +878,13 @@
   var DEFAULT_CHANNELS_BY_CITY = {
     kyiv:     ["kpszsu", "mon1tor_ua", "monitorwarr"],
     irpin:    ["kpszsu", "monitorwarr"],
-    mykolaiv: ["mykolaivskaODA", "kpszsu"],
+    // mykolaivskaODA turned out to be a dead handle — checked its live
+    // t.me/s/ feed and it's just 2 messages from March pointing at a
+    // private invite link that itself now resolves to an unrelated spam
+    // channel. truexanikolaev (Труха⚡️Миколаїв) is verified live instead —
+    // real-time drone/missile threat posts for Mykolaiv specifically, not
+    // just regional-administration news.
+    mykolaiv: ["truexanikolaev", "kpszsu"],
     odesa:    ["alertOdessa", "kpszsu"]
   };
 
@@ -907,7 +913,7 @@
       tgCache: {},
       tgProxyPref: {},
       alertsProxyPref: null,
-      channelsCuratedVersion: 3,
+      channelsCuratedVersion: 4,
       hereLat: null,
       hereLon: null,
       hereAccuracy: null,
@@ -916,7 +922,7 @@
       neptunDefaultApplied: true,
       compassMapFraction: 0.48,
       compassSplitDefaultApplied: true,
-      mapZoomDefaultVersion: 2
+      mapZoomDefaultVersion: 3
     };
   }
 
@@ -950,6 +956,16 @@
         });
         parsed.channelsCuratedVersion = 3;
       }
+      // v4: mykolaivskaODA was a dead handle (checked live — just a couple
+      // of stale messages pointing at a private invite link that itself now
+      // resolves to an unrelated spam channel). Swapped in truexanikolaev, a
+      // verified-live Mykolaiv-specific threat channel.
+      if(!(parsed.channelsCuratedVersion >= 4)){
+        Object.keys(DEFAULT_CHANNELS_BY_CITY).forEach(function(cid){
+          parsed.channelsByCity[cid] = DEFAULT_CHANNELS_BY_CITY[cid].slice();
+        });
+        parsed.channelsCuratedVersion = 4;
+      }
       // One-time: NEPTUN's API got verified live (real endpoint, real CORS,
       // real data) after it shipped as an opt-in toggle default-off. Turn
       // it on once for anyone who already has saved state; never again
@@ -982,6 +998,15 @@
           });
         }
         parsed.mapZoomDefaultVersion = 2;
+      }
+      // v3: explicit request for the exact same crop on every city, not
+      // just cities that happened to look untouched — clears all saved
+      // per-city pan/zoom for the alerts.in.ua map so every one of them
+      // (visited before or not) regenerates fresh at the current
+      // MAP_ZOOM_DEFAULT with no leftover per-city offset.
+      if(!(rawMapZoomDefaultVersion >= 3)){
+        parsed.mapManualByCity = {};
+        parsed.mapZoomDefaultVersion = 3;
       }
       return parsed;
     }catch(e){ return defaultState(); }
@@ -1070,23 +1095,46 @@
     armHereAutoRefresh();
   }
 
+  // A single getCurrentPosition() call returns whatever the browser's
+  // *first* fix happens to be — on a laptop/desktop with no GPS chip
+  // that's a Wi-Fi/IP-based estimate that can easily jump several km and
+  // often improves noticeably a few seconds later as more signal comes in.
+  // So instead this samples for a real window (watchPosition) and keeps
+  // whichever reading reports the smallest accuracy radius, exiting early
+  // only once that radius is already tight (an actual GPS chip locking on).
   function geolocateHere(silent){
     if(!navigator.geolocation){
       if(!silent) alert("Цей браузер не підтримує визначення місцезнаходження.");
       return;
     }
     hereBtn.textContent = "📍 визначаю…";
-    // High-accuracy GPS fix first (real GPS chip if there is one — a phone
-    // or a laptop with one — can take longer than the old 12s to get a cold
-    // fix, so this gets a more forgiving 20s). If that genuinely fails or
-    // times out, fall back once to a coarser (Wi-Fi/IP-based) fix rather
-    // than just giving up — worse precision beats no location at all.
-    navigator.geolocation.getCurrentPosition(applyHerePosition, function(err){
-      navigator.geolocation.getCurrentPosition(applyHerePosition, function(err2){
+    var best = null;
+    var watchId = null;
+    var settled = false;
+
+    function finish(){
+      if(settled) return;
+      settled = true;
+      if(watchId != null){ navigator.geolocation.clearWatch(watchId); watchId = null; }
+      if(best){
+        applyHerePosition(best);
+      } else {
         updateHereBtn();
-        if(!silent) alert("Не вдалося визначити місцезнаходження: " + (err2 && err2.message ? err2.message : "доступ відхилено") + ".");
-      }, {enableHighAccuracy:false, timeout:10000, maximumAge:60000});
-    }, {enableHighAccuracy:true, timeout:20000, maximumAge:0});
+        if(!silent) alert("Не вдалося визначити місцезнаходження: доступ відхилено або сигнал GPS/Wi-Fi відсутній.");
+      }
+    }
+
+    try{
+      watchId = navigator.geolocation.watchPosition(function(pos){
+        if(!best || (pos.coords.accuracy != null && pos.coords.accuracy < best.coords.accuracy)) best = pos;
+        if(pos.coords.accuracy != null && pos.coords.accuracy <= 50) finish(); // already tight — a real GPS chip locked on, no need to keep waiting
+      }, function(err){
+        if(!best) finish(); // no usable reading at all — surface the error; if we already have one, just keep sampling
+      }, {enableHighAccuracy:true, timeout:20000, maximumAge:0});
+    }catch(e){
+      watchId = null;
+    }
+    setTimeout(finish, 8000);
   }
 
   function updateHereBtn(){
@@ -1095,9 +1143,17 @@
       var acc = state.hereAccuracy != null ? ", ±" + (state.hereAccuracy >= 1000 ? (state.hereAccuracy/1000).toFixed(1) + " км" : state.hereAccuracy + " м") : "";
       hereBtn.textContent = "📍 оновити" + (ago != null ? " (" + ago + " хв тому" + acc + ")" : "");
       hereBtn.classList.add("on");
+      // A large radius here isn't something the app can fix — it means
+      // this device has no GPS chip (or it's not answering) and the
+      // browser fell back to Wi-Fi/IP-based positioning, which is only
+      // ever metro-area-level. A phone with real GPS will lock in tight.
+      hereBtn.title = (state.hereAccuracy != null && state.hereAccuracy > 1500)
+        ? "Точність лише ±" + (state.hereAccuracy/1000).toFixed(1) + " км — цей пристрій, схоже, без GPS-чипа (визначає по Wi-Fi/IP). Відкрий на телефоні для точного GPS, або додай своє місце вручну через Налаштування → координати."
+        : "";
     } else {
       hereBtn.textContent = "📍 моє місце";
       hereBtn.classList.remove("on");
+      hereBtn.title = "";
     }
   }
 
